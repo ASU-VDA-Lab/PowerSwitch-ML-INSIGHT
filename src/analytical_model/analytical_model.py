@@ -1,7 +1,9 @@
-import json, csv, math
-import matplotlib.pyplot as plt
+import json, csv, math, os, time
+import itertools
+import multiprocessing as mp
+import threading
 
-lut_file = "C:/Users/gvikr/OneDrive/Desktop/Inrush_automation/lut2.txt"
+lut_file = "/home/vgopal18/python/lut2.txt"
 lut2 = dict()
 vin_keys = [0.7,0.6,0.5,0.4,0.3,0.2,0.1,0]
 print(vin_keys)
@@ -10,7 +12,7 @@ with open(lut_file) as fp:
         lut2[float(line.split()[0])] = {}
         for k in range(len(vin_keys)):
             lut2[float(line.split()[0])][vin_keys[k]] = float(line.split()[k+1])
-print(lut2)
+#print(lut2)
 
 def lookup2d(vds, vin, lut):
     if vds in lut and vin in lut[vds]:
@@ -69,35 +71,20 @@ def integrate(current,step):
         #print(sum)
     return sum
 
-config = "C:/Users/gvikr/OneDrive/Desktop/Inrush_automation/config.json"
-fp = open(config)
-data = json.load(fp)
-#data["sw_per_stage"] = [40-x for x in range(40)]
-#data['sw_per_stage'] = [20, 2, 3]
-data['sw_per_stage'] = [6, 6, 6, 7, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13, 14, 15, 15]
-#data['sw_per_stage'] = [34,6,10]
-#data["trickle_switches"] = sum(data["sw_per_stage"])
-if (type(data['sw_per_stage']) == type([])):
-    stages = len(data['sw_per_stage'])
-else:
-    stages = math.ceil(data['trickle_switches']/data['sw_per_stage'])
-    data['sw_per_stage'] = [data['sw_per_stage'] for i in range(stages)]
-
-operating_leakage_current_per_sw = data['operating_leakage_current'] / data['trickle_switches']
-inrush_data = []
-current_values = []
-wakeup_latency = stages*data['delay']+data['Response']
-step_size = 1
-stop_time = math.ceil(wakeup_latency/step_size)*step_size
-stop_time = 2000
-sim_time = range(0,stop_time+1,step_size)
-print("Stop Time : "+str(stop_time))
-print("Step Size : "+str(step_size))
-print("Total Time Steps : "+str(len(sim_time)))
-print("Total Stages : "+str(stages))
-print("Wakeup latency: "+str(wakeup_latency))
-
-def main_func(data):
+def inrush(data, sw_per_stage):
+    inrush_data = []
+    stages = len(sw_per_stage)
+    step_size = 5
+    #stop_time = math.ceil(wakeup_latency/step_size)*step_size
+    stop_time = int(1E4)
+    sim_time = range(0,stop_time,step_size)
+    #print("Stop Time : "+str(stop_time))
+    #print("Step Size : "+str(step_size))
+    #print("Total Time Steps : "+str(len(sim_time)))
+    #print("Total Stages : "+str(stages))
+    #print("Wakeup latency: "+str(wakeup_latency))
+    slew = [1.4+0.8498*(x-1) for x in sw_per_stage]
+    #wakeup_latency = stages*data['delay']+slew[-1]
     time_current = []
     vol = []
     vdd_sw = 0
@@ -105,35 +92,37 @@ def main_func(data):
     vds = vdd - vdd_sw
     vin = 0.7
     vth = 0.3
-    slew = 0
-
+    exit_loop = 0
+    operating_leakage_current_per_sw = data['operating_leakage_current'] / sum(sw_per_stage)
     for current_time in sim_time:
         stage_current = []
         for j in range(stages):
             #stage_current = [str(j)]
             input_signal_time = data['delay']*j
-            input_signal_time_end = input_signal_time + slew
-            stage_leakage = data['sw_per_stage'][j]*data['Ileak']
+            input_signal_time_end = input_signal_time + slew[j]
+            stage_leakage = sw_per_stage[j]*data['Ileak']
             if (current_time < input_signal_time):
-                switch_current = lookup2d(vds,vin,lut2)*data['sw_per_stage'][j]
+                switch_current = lookup2d(vds,vin,lut2)*sw_per_stage[j]
             else:
                 if (current_time >= input_signal_time_end):
                     vin_now = 0
                 else:
-                    vin_now = ((input_signal_time_end - current_time)*vin)/slew
-                print("Vin:"+str(vin_now))
-                print("Vds:"+str(vds))
-                print("vdd_sw"+str(vdd_sw))
+                    vin_now = ((input_signal_time_end - current_time)*vin)/slew[j]
+                #print(vds)
+                #print(vdd_sw)
                 if (vds < vdd-vth):
-                    switch_current = operating_leakage_current_per_sw
+                    switch_current = operating_leakage_current_per_sw*sw_per_stage[j]
+                    wakeup_latency = current_time
+                    exit_loop = 1
                 else:
-                    switch_current = lookup2d(vds,vin_now,lut2)*data['sw_per_stage'][j]
-                print(switch_current)
+                    switch_current = lookup2d(vds,vin_now,lut2)*sw_per_stage[j]
+                #switch_current = lookup(vds,lut)*sw_per_stage[j]
+                #print(switch_current)
             stage_current.append(switch_current)
         inrush_data.append(stage_current)
         total_current = sum(stage_current)
         time_current.append(total_current)
-        print(sum(time_current)*step_size)
+        #print(sum(time_current)*step_size)
         #vdd_sw = (sum(time_current)*step_size*(10**-12))/data['load_cap']
         vdd_sw = integrate(time_current,step_size*(10**-12))/data['load_cap']
         if (vdd_sw >= vdd):
@@ -141,36 +130,60 @@ def main_func(data):
             #break
         vds = vdd - vdd_sw
         vol.append(vdd_sw)
+        if(exit_loop):
+            break
     #print(stage_current)
     #print(inrush_data)
     #print(vol)
-    return time_current, vol
+    #print("Max Inrush Current: "+str(max(time_current)))
+    return max(time_current),wakeup_latency
 
-data['load_cap'] = 4E-12
-master_tc = []
-master_vol = []
-for i in range(20):
-    data['load_cap'] = (i+1)*(10**-12)
-    time_current, vol = main_func(data)
-    #time_current.insert(0,0)
-    master_tc.append(time_current)
-    master_vol.append(vol)
+start = time.time()
+config = "/home/vgopal18/python/config.json"
+fp = open(config)
+data = json.load(fp)
+i = [56,34,10]
 
-#print("Max Inrush Current: "+str(max(time_current)))
-#print("Switches per stage : "+" ".join([str(i) for i in data['sw_per_stage']]))
-print(len(sim_time))
-print(len(master_tc[0]))
-for t in master_tc:
-    plt.plot(sim_time,t)
-plt.title("Inrush Plot")
-plt.xlabel("Time")
-plt.ylabel("Current")
-plt.show()
+#Ariane	1000	8	28.653	26.1
+#AES256	930	7	22	23.71
+#Mempool	710	7	19.49	17.14
+#Ariane	180	8	28.653	25000
+#AES256	175	7	22	23.71
+#Mempool	160	7	19.49	3700
+#Ibex	145	6	2.783	3.04
+#JPEG	140	6	6.13	6.57
+#AES128	140	5	2.048	1.89
+#Ethmac	140	4	9.148	11.74
+#Raven_SHA	135	4	3.69	3.71
+#Mock-array	120	3	10.198	0.47
+#Amber	110	3	1	0.68
 
-with open('C:/Users/gvikr/OneDrive/Desktop/Inrush_automation/i_cap_algo.txt','w') as fpw:
-    print(len(master_tc[0]),len(sim_time))
-    for i in range(len(sim_time)):
-        current = ""
-        for j in master_tc:
-            current = current+str(j[i])+" "
-        fpw.write(str(sim_time[i])+" "+current+"\n")
+design = "marr"
+patterns = "/home/vgopal18/python/ML_data/python_data/patterns/"+design+"_patterns.txt"
+cap = 10.198e-12
+ileak = 0.47e-6
+out = "/home/vgopal18/python/ML_data/python_data/clean_data/new/results_"+design+".csv"
+stage = 3
+
+head = ",".join(["Stage"+str(i) for i in range(1,stage+1)])
+head = head + ',MaxI,Wl\n'
+
+fpw = open(out,'w')
+fp = open(patterns,'r')
+fpw.write(head)
+
+data['load_cap'] = cap 
+data['operating_leakage_current'] = ileak
+fp.readline()
+for l in fp.readlines():
+    pattern = [int(x) for x in l.rstrip().split(',')]
+    irush, wl = inrush(data,pattern)
+    fpw.write(l.rstrip()+','+str(irush)+','+str(wl)+'\n')
+
+fp.close()
+fpw.close()
+end = time.time()
+diff = end -start
+print("Finished writing ",out)
+print("Run Time: ",diff,' seconds')
+
