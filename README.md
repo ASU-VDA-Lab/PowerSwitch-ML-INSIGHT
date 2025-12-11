@@ -1,7 +1,7 @@
 # **ML-INSIGHT : Machine Learning–Driven Power Switch Network Optimization**  
-[[ML-INSIGHT V1 (ISLPED 2024)]](https://dl.acm.org/doi/10.1145/3665314.3670807)
+[ISLPED 2024](https://dl.acm.org/doi/10.1145/3665314.3670807)
 
-ML-INSIGHT is a machine-learning–based framework that accelerates **Power Switch Network (PSN)** optimization by predicting **inrush current** and **wake-up latency** with over **50× speedup** compared to SPICE. The work in this repository is an extension of the ML-INSIGHT paper published in ISLPED 2024.
+ML-INSIGHT is a machine-learning–based framework that accelerates **Power Switch Network (PSN)** optimization by predicting **inrush current** and **wake-up latency** with over **50× speedup** compared to SPICE. The framework proposed in the ISLPED 2024 conference had some limitations and we have extened the work and created a more complete frameowrk. This repository contains both the ISLPED conference model and the latest ML-INSIGHT.
 
 ## **Abstract**
 
@@ -32,7 +32,7 @@ Experiments using ten real designs in ASAP7 show:
 - [src](./src/)
   - [analytical_model](./src/analytical_model/)
   - [ML-INSIGHT](./src/ML-INSIGHT/)
-  - [ML-INSIGHT_v1](./src/ML-INSIGHT_v1/)
+  - [conference_version](./src/ML-INSIGHT_v1/)
 
 - [README.md](./README.md)
 
